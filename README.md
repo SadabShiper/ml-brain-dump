@@ -16,7 +16,7 @@ No pretending to be an expert here.
 ## Current Topics
 
 - Seq2Seq Models (Basic and Attention-based)
-- More coming as I learn...
+- Transformers (Upto Self-attention module)
 
 ## Why This Exists
 
