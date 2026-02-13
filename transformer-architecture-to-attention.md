@@ -180,13 +180,77 @@ Z output: 4 words × 64
 
 ---
 
+## Step 3: Multi-Head Attention
+
+Single self-attention is good but it has limits. **Multi-head attention** solves this by running **multiple self-attention modules in parallel**.
+
+### Why Multi-Head?
+
+It helps in two ways:
+
+**1. Focus on different positions** - A single attention head's output `Z` can be dominated by the word itself. With multiple heads, different heads can focus on different parts of the sentence. For example when encoding `"it"` in `"The animal didn't cross the street because it was too tired"`, one head focuses on `"animal"` and another focuses on `"tired"`.
+
+**2. Learn multiple types of relationships** - Each head learns a different kind of relationship between words in parallel.
+
+### How it Works
+
+The original Transformer uses **8 attention heads**. Each head has its own set of weight matrices:
+
+```
+Head 1: W^Q_1, W^K_1, W^V_1  →  Z1
+Head 2: W^Q_2, W^K_2, W^V_2  →  Z2
+...
+Head 8: W^Q_8, W^K_8, W^V_8  →  Z8
+```
+
+The self-attention calculation is exactly the same as before, just done **8 times independently** with different weight matrices. Each head produces its own `Z` matrix.
+
+### Combining the Heads
+
+The FFNN expects a **single matrix**, not 8. So we need to combine them:
+
+**Step 1:** Concatenate all 8 Z matrices side by side
+
+```
+[Z1, Z2, Z3, Z4, Z5, Z6, Z7, Z8]
+```
+
+**Step 2:** Multiply by `W_O` - a weight matrix that is **learned during training**
+
+```
+Final Z = [Z1, Z2, ..., Z8]  ×  W_O
+```
+
+> **What does `W_O` do?**
+> It compresses the concatenated matrix back down to the right size so the FFNN can take it as input. Think of it as a learned compression step.
+
+**Step 3:** Pass the final `Z` to the FFNN
+
+### Full Multi-Head Flow
+
+```
+Input X
+  ↓
+8 attention heads run in parallel (each with own W^Q, W^K, W^V)
+  ↓
+8 separate Z matrices: Z1, Z2, ..., Z8
+  ↓
+Concatenate → [Z1, Z2, ..., Z8]
+  ↓
+Multiply by W_O (learned during training)
+  ↓
+Final Z → passed to FFNN
+```
+
+---
+
 ## Key Takeaways So Far
 
-| Architecture | Self-Attention |
-|---|---|
-| 6 encoder + 6 decoder layers | Creates Q, K, V vectors of size **64** |
-| Only first encoder gets word embeddings | Weight matrices are **learned**, not fixed |
-| Final encoder output goes to all decoder layers | Output Z has size **64** per word |
+| Architecture | Self-Attention | Multi-Head Attention |
+|---|---|---|
+| 6 encoder + 6 decoder layers | Creates Q, K, V vectors of size **64** | 8 heads run in **parallel** |
+| Only first encoder gets word embeddings | Weight matrices are **learned**, not fixed | Each head produces its own **Z matrix** |
+| Final encoder output goes to all decoder layers | Output Z has size **64** per word | `W_O` compresses all heads into **one Z** |
 
 ---
 
