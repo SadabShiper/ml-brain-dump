@@ -241,16 +241,164 @@ Multiply by W_O (learned during training)
   ↓
 Final Z → passed to FFNN
 ```
+---
+
+## Step 4: Positional Encoding
+
+> **Note on order:** Positional encoding actually happens **before** self-attention in the real model - right after the input embeddings. It is covered here later because that is the order it appears in the blog.
+
+The model has no built-in sense of word order. Positional encoding fixes this by **adding a vector to each input embedding** before it enters the encoder.
+
+### What does it do?
+- Gives the model a way to know **where each token sits** in the sentence
+- Each position gets a **unique vector** of size 512
+- The model uses this to distinguish between the same word appearing at different positions
+
+### How is it calculated?
+- The left half of the positional encoding vector uses a **sine function**
+- The right half uses a **cosine function**
+- These two are combined to form one positional encoding vector per token
+
+```
+Position 1 → [sin(...), sin(...), ..., cos(...), cos(...)]  ← size 512
+Position 2 → [sin(...), sin(...), ..., cos(...), cos(...)]  ← size 512
+...
+```
+
+> **Common Misconception:** Positional encoding does not block relationships between distant tokens. The model can still attend to **any position**. What it does is give each position a unique signature so the model knows the order. Relationships between tokens are still decided by the attention scores.
+
+---
+
+## Step 5: Residual Connections and Layer Normalization
+
+Each sub-layer (self-attention and FFNN) inside every encoder and decoder has a **residual connection** wrapped around it, followed by **layer normalization**.
+
+### What is a Residual Connection?
+The input to a sub-layer is **added back** to the output of that sub-layer:
+
+```
+output = LayerNorm( input + sublayer(input) )
+```
+
+### Why does it exist?
+The primary reason is to solve the **vanishing gradient problem** during training. Gradients can flow directly through the residual path without passing through the transformation, making it easier to train deep networks.
+
+> A useful side effect is that the original input information is preserved even after transformation.
+
+### Full Encoder Sub-layer Flow:
+```
+Input
+  ↓
+Self-Attention
+  ↓
+Add input + attention output  ← residual connection
+  ↓
+Layer Normalization
+  ↓
+FFNN
+  ↓
+Add input + FFNN output  ← residual connection
+  ↓
+Layer Normalization
+  ↓
+Output to next encoder
+```
+
+This same pattern applies to **every sub-layer in the decoder** as well.
+
+---
+
+## Step 6: The Decoder - Full Walkthrough
+
+Now that the encoder is done, the decoder takes over. Here is how it works step by step:
+
+**Step 1:** Start with the `<START>` token, calculate its **input embedding** and add **positional encoding**, same as the encoder side
+
+**Step 2:** Pass to the **Masked Self-Attention** layer
+- The decoder can only look at **previously generated tokens**, not future ones
+- Future positions are set to `-inf` before softmax so they get zeroed out after softmax
+
+**Step 3:** **Add & Layer Normalize** (residual connection)
+
+**Step 4:** Pass to the **Encoder-Decoder Attention** layer
+- The **Query** vector comes from the decoder (output of step 3)
+- The **Key** and **Value** vectors come from the **final encoder layer output**
+- This is how the decoder looks at the input sentence while generating each word
+
+**Step 5:** **Add & Layer Normalize** (residual connection)
+
+**Step 6:** Pass through the **FFNN**
+
+**Step 7:** **Add & Layer Normalize** (residual connection)
+
+**Step 8:** Pass through a **Linear layer + Softmax**
+- Linear layer projects the output into a vector the size of the vocabulary (e.g. 10,000 words)
+- Softmax converts these into **probabilities** that add up to 1
+- The word with the **highest probability** is selected as the output (**greedy decoding**)
+
+> **Alternative to greedy decoding:** Beam search keeps the top N candidates at each step and picks the overall best sequence at the end. This often gives better results than always picking the single best word.
+
+**Step 9:** The output word is **fed back into the bottom decoder** as input for the next step
+
+**Step 10:** Repeat until the `<END>` token is generated
+
+### Full Decoder Flow:
+```
+<START> token + positional encoding
+  ↓
+Masked Self-Attention (can't see future tokens)
+  ↓
+Add & Layer Norm
+  ↓
+Encoder-Decoder Attention (Q from decoder, K and V from encoder)
+  ↓
+Add & Layer Norm
+  ↓
+FFNN
+  ↓
+Add & Layer Norm
+  ↓
+Linear + Softmax
+  ↓
+Output word → fed back to bottom decoder for next step
+```
+
+---
+
+## Step 7: Loss Function and Training
+
+### Forward Pass
+During training, the model does the same forward pass as during inference. But now we have the **correct answer** to compare against.
+
+### Comparing the Output
+- The model outputs a **probability distribution** over the vocabulary at each step
+- We compare this with the **target token** (the correct word)
+- The difference is measured using **Cross-Entropy** or **KL-Divergence**
+
+```
+Model output:  [0.1, 0.6, 0.05, ...]  ← probability for each word
+Target:        [0.0, 1.0, 0.00, ...]  ← correct word has probability 1
+Loss = difference between the two distributions
+```
+
+### Backpropagation
+- The loss is used to **update all the weight matrices** in the model via backpropagation
+- This includes `W^Q`, `W^K`, `W^V`, `W_O`, and all FFNN weights
+- Over many training steps, the model gets better at predicting the correct output
 
 ---
 
 ## Key Takeaways So Far
 
-| Architecture | Self-Attention | Multi-Head Attention |
-|---|---|---|
-| 6 encoder + 6 decoder layers | Creates Q, K, V vectors of size **64** | 8 heads run in **parallel** |
-| Only first encoder gets word embeddings | Weight matrices are **learned**, not fixed | Each head produces its own **Z matrix** |
-| Final encoder output goes to all decoder layers | Output Z has size **64** per word | `W_O` compresses all heads into **one Z** |
+| Topic | Key Point |
+|---|---|
+| Architecture | 6 encoder + 6 decoder layers, final encoder output goes to **all** decoder layers |
+| Self-Attention | Q, K, V vectors of size **64**, weight matrices are **learned** |
+| Multi-Head Attention | 8 heads in parallel, `W_O` compresses back to size **512** |
+| Positional Encoding | Unique vector per position using sine + cosine, does **not** block distant attention |
+| Residual Connection | Solves **vanishing gradient**, applied around every sub-layer |
+| Decoder | Masked self-attention → encoder-decoder attention → FFNN → linear + softmax |
+| Loss Function | Cross-entropy or KL-divergence between output and target distribution |
 
 ---
 
